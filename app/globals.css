@@ -71,6 +71,7 @@ button.ghost:hover {
 
 h1,
 h2,
+h3,
 p {
   margin: 0;
 }
@@ -170,7 +171,14 @@ textarea:focus {
 .section-heading {
   align-items: center;
   display: flex;
+  gap: 8px;
   justify-content: space-between;
+}
+
+.button-row {
+  align-items: center;
+  display: flex;
+  gap: 6px;
 }
 
 .listings-panel {
@@ -190,6 +198,11 @@ textarea:focus {
   padding: 10px;
 }
 
+.listing-card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(23, 105, 224, 0.12);
+}
+
 .listing-card header {
   align-items: start;
   display: flex;
@@ -200,6 +213,21 @@ textarea:focus {
 .listing-card h3 {
   font-size: 0.98rem;
   margin: 0;
+}
+
+.listing-title-button {
+  background: transparent;
+  color: var(--text);
+  display: grid;
+  gap: 3px;
+  min-height: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.listing-title-button:hover {
+  background: transparent;
+  color: var(--accent);
 }
 
 .listing-card dl {
@@ -219,28 +247,46 @@ textarea:focus {
   margin: 0;
 }
 
-.diagnostics-panel {
-  background: #fbfcff;
-}
-
-.diagnostics-list {
+.history-stack,
+.history-group {
   display: grid;
-  gap: 5px 10px;
-  grid-template-columns: auto minmax(0, 1fr);
-  margin: 0;
+  gap: 10px;
 }
 
-.diagnostics-list dt {
-  color: var(--muted);
-  font-size: 0.78rem;
-  font-weight: 700;
+.history-group {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
 }
 
-.diagnostics-list dd {
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+.history-group:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.history-group h3 {
+  font-size: 0.92rem;
+}
+
+.route-pill {
+  border-radius: 999px;
+  color: #fff;
   font-size: 0.78rem;
-  margin: 0;
-  overflow-wrap: anywhere;
+  font-weight: 800;
+  padding: 4px 8px;
+}
+
+.spark-bars {
+  align-items: end;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  gap: 3px;
+  height: 72px;
+}
+
+.spark-bars span {
+  border-radius: 4px 4px 0 0;
+  flex: 1;
+  min-width: 5px;
 }
 
 .map-shell {

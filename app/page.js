@@ -6,8 +6,7 @@ import preloadedState from "../data/preloaded-state.json";
 const STORAGE_KEY = "houseHunterState.v2";
 const DEFAULT_CENTER = { lat: 38.9072, lng: -77.0369 };
 const ENV_GOOGLE_MAPS_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "";
-const DEBUG_MAPS = process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_DEBUG_MAPS === "true";
-const APP_DIAGNOSTIC_VERSION = "diagnostics-2026-07-09-1";
+const DEBUG_MAPS = process.env.NEXT_PUBLIC_DEBUG_MAPS === "true";
 
 const emptyState = {
   workplaces: {
@@ -32,7 +31,9 @@ export default function Home() {
   const [mapReady, setMapReady] = useState(false);
   const [draftPlace, setDraftPlace] = useState({ name: "", address: "", rent: "", beds: "", notes: "" });
   const [shareCopied, setShareCopied] = useState(false);
-  const [startupDiagnostics, setStartupDiagnostics] = useState(null);
+  const [routeSnapshots, setRouteSnapshots] = useState([]);
+  const [selectedListingId, setSelectedListingId] = useState(null);
+  const [snapshotStatus, setSnapshotStatus] = useState("Route history not loaded yet.");
 
   const loadedInitialStateRef = useRef(false);
   const mapNodeRef = useRef(null);
@@ -44,6 +45,7 @@ export default function Home() {
   const listingMarkersRef = useRef(new Map());
   const radiusPolygonRef = useRef(null);
   const workplaceAreaPolygonsRef = useRef([]);
+  const routePolylinesRef = useRef([]);
   const hydratedMissingPlacesRef = useRef(false);
   const drewInitialWorkplaceAreasRef = useRef(false);
   const workplaceAInputRef = useRef(null);
@@ -51,8 +53,6 @@ export default function Home() {
   const listingAddressInputRef = useRef(null);
 
   useEffect(() => {
-    setStartupDiagnostics(getStartupDiagnostics());
-    logStartupDiagnostics();
     logMaps("env", {
       hasKey: Boolean(ENV_GOOGLE_MAPS_KEY),
       keyPrefix: ENV_GOOGLE_MAPS_KEY ? `${ENV_GOOGLE_MAPS_KEY.slice(0, 6)}...` : "",
@@ -101,6 +101,40 @@ export default function Home() {
     }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
   }, [saved]);
+
+  const loadRouteSnapshots = useCallback(async () => {
+    try {
+      const response = await fetch("/api/commute-snapshots?limit=1000", { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Could not load route history.");
+      }
+      setRouteSnapshots(data.snapshots || []);
+      setSnapshotStatus(
+        data.configured
+          ? data.scheduler?.lastRunAt
+            ? `Last automatic capture: ${formatTimestamp(data.scheduler.lastRunAt)}.`
+            : "Route history is ready. Capture current routes to seed the chart."
+          : "Add Supabase environment variables to save route history.",
+      );
+    } catch (error) {
+      setSnapshotStatus(error.message || "Could not load route history.");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!loadedInitialStateRef.current) {
+      return;
+    }
+
+    fetch("/api/commute-snapshots", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state: saved, captureNow: false }),
+    })
+      .then(() => loadRouteSnapshots())
+      .catch((error) => setSnapshotStatus(error.message || "Could not start route history capture."));
+  }, [loadRouteSnapshots, saved]);
 
   useEffect(() => {
     if (!apiKey) {
@@ -363,6 +397,9 @@ export default function Home() {
         logMaps("render:listing-marker", { id: listing.id, name: listing.name, place: listing.place });
       });
 
+      routePolylinesRef.current.forEach(clearMarker);
+      routePolylinesRef.current = drawLatestRouteLines(routeSnapshots, selectedListingId, mapRef.current);
+
       fitMapToPoints([
         ...Object.values(next.workplaces).map((workplace) => workplace.place),
         ...next.listings.map((listing) => listing.place),
@@ -374,7 +411,7 @@ export default function Home() {
       }
       logMaps("render:success");
     },
-    [drawDriveTimeArea, drawSavedWorkplaceAreas],
+    [drawDriveTimeArea, drawSavedWorkplaceAreas, routeSnapshots, selectedListingId],
   );
 
   useEffect(() => {
@@ -408,14 +445,40 @@ export default function Home() {
     window.setTimeout(() => setShareCopied(false), 1800);
   }, [saved]);
 
+  const captureCurrentRoutes = useCallback(async () => {
+    setSnapshotStatus("Capturing current route times...");
+    const response = await fetch("/api/commute-snapshots", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state: saved, captureNow: true }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      setSnapshotStatus(data.error || "Could not capture current routes.");
+      return;
+    }
+    await loadRouteSnapshots();
+    setSnapshotStatus(`Captured ${data.snapshots?.length || 0} route snapshots.`);
+  }, [loadRouteSnapshots, saved]);
+
   const listingCards = useMemo(
     () =>
       saved.listings.map((listing) => ({
         ...listing,
         meta: [listing.rent, listing.beds ? `${listing.beds} beds` : ""].filter(Boolean).join(" - "),
+        latestSnapshots: getLatestListingSnapshots(routeSnapshots, listing.id),
+        history: getListingHistory(routeSnapshots, listing.id),
       })),
-    [saved.listings],
+    [routeSnapshots, saved.listings],
   );
+
+  const selectedListing = listingCards.find((listing) => listing.id === selectedListingId) || listingCards[0] || null;
+
+  useEffect(() => {
+    if (!selectedListingId && listingCards[0]) {
+      setSelectedListingId(listingCards[0].id);
+    }
+  }, [listingCards, selectedListingId]);
 
   return (
     <main className="app-shell">
@@ -423,7 +486,7 @@ export default function Home() {
         <section className="panel">
           <h1>House Hunter</h1>
           <p className="muted">
-            Save places locally, compare drive times to both workplaces, and copy a share link your girlfriend can open.
+            Compare apartments by current and historical drive times to both workplaces.
           </p>
           {!ENV_GOOGLE_MAPS_KEY && (
             <>
@@ -439,22 +502,6 @@ export default function Home() {
           <button type="button" className="secondary" onClick={copyShareLink} disabled={!saved.listings.length && !saved.workplaces.a.address && !saved.workplaces.b.address}>
             {shareCopied ? "Copied" : "Copy share link"}
           </button>
-        </section>
-
-        <section className="panel diagnostics-panel">
-          <h2>Diagnostics</h2>
-          <dl className="diagnostics-list">
-            <dt>Build</dt>
-            <dd>{APP_DIAGNOSTIC_VERSION}</dd>
-            <dt>Google key</dt>
-            <dd>{startupDiagnostics?.hasGoogleMapsKey ? `present (${startupDiagnostics.googleMapsKeyPrefix})` : "missing"}</dd>
-            <dt>Debug env</dt>
-            <dd>{startupDiagnostics?.debugMapsValue || "not set"}</dd>
-            <dt>Debug on</dt>
-            <dd>{String(startupDiagnostics?.debugMapsEnabled ?? DEBUG_MAPS)}</dd>
-            <dt>Origin</dt>
-            <dd>{startupDiagnostics?.origin || "loading"}</dd>
-          </dl>
         </section>
 
         <section className="panel">
@@ -514,19 +561,25 @@ export default function Home() {
         <section className="panel listings-panel">
           <div className="section-heading">
             <h2>Places</h2>
-            <button className="ghost" type="button" onClick={clearListings}>
-              Clear
-            </button>
+            <div className="button-row">
+              <button className="ghost" type="button" onClick={captureCurrentRoutes} disabled={!saved.listings.length}>
+                Capture latest
+              </button>
+              <button className="ghost" type="button" onClick={clearListings}>
+                Clear
+              </button>
+            </div>
           </div>
+          <p className="muted">{snapshotStatus}</p>
           <div className="listing-list" aria-live="polite">
             {!listingCards.length && <p className="muted">No places yet.</p>}
             {listingCards.map((listing) => (
-              <article className="listing-card" key={listing.id}>
+              <article className={`listing-card ${selectedListing?.id === listing.id ? "selected" : ""}`} key={listing.id}>
                 <header>
-                  <div>
+                  <button className="listing-title-button" type="button" onClick={() => setSelectedListingId(listing.id)}>
                     <h3>{listing.name}</h3>
                     <p className="muted">{listing.meta || listing.address}</p>
-                  </div>
+                  </button>
                   <button className="ghost" type="button" onClick={() => deleteListing(listing.id)}>
                     Delete
                   </button>
@@ -535,9 +588,9 @@ export default function Home() {
                   <dt>Address</dt>
                   <dd>{listing.place?.address || listing.address}</dd>
                   <dt>Your drive</dt>
-                  <dd>{listing.commutes?.a?.label || "Set workplace"}</dd>
+                  <dd>{listing.latestSnapshots.a?.duration_text || listing.commutes?.a?.label || "Set workplace"}</dd>
                   <dt>Their drive</dt>
-                  <dd>{listing.commutes?.b?.label || "Set workplace"}</dd>
+                  <dd>{listing.latestSnapshots.b?.duration_text || listing.commutes?.b?.label || "Set workplace"}</dd>
                   {listing.notes && (
                     <>
                       <dt>Notes</dt>
@@ -549,6 +602,13 @@ export default function Home() {
             ))}
           </div>
         </section>
+
+        {selectedListing && (
+          <section className="panel">
+            <h2>{selectedListing.name} route history</h2>
+            <RouteHistory listing={selectedListing} />
+          </section>
+        )}
       </aside>
 
       <section className="map-shell">
@@ -567,6 +627,50 @@ export default function Home() {
     usable.forEach((point) => bounds.extend(point));
     mapRef.current.fitBounds(bounds);
   }
+}
+
+function RouteHistory({ listing }) {
+  const workplaceKeys = Object.keys(listing.history);
+
+  if (!workplaceKeys.length) {
+    return <p className="muted">No route captures yet. Use Capture latest to start the time series.</p>;
+  }
+
+  return (
+    <div className="history-stack">
+      {workplaceKeys.map((key) => {
+        const points = listing.history[key];
+        const latest = points.at(-1);
+        const maxSeconds = Math.max(...points.map((point) => point.duration_seconds || 0), 1);
+
+        return (
+          <section className="history-group" key={key}>
+            <div className="section-heading">
+              <h3>{latest.workplace_label}</h3>
+              <span className="route-pill" style={{ backgroundColor: getRouteColor(latest.duration_seconds) }}>
+                {formatDuration(latest.duration_seconds)}
+              </span>
+            </div>
+            <div className="spark-bars" aria-label={`${latest.workplace_label} commute time history`}>
+              {points.map((point) => (
+                <span
+                  key={point.id || `${point.captured_at}-${point.workplace_key}`}
+                  title={`${formatTimestamp(point.captured_at)}: ${formatDuration(point.duration_seconds)}`}
+                  style={{
+                    height: `${Math.max(12, ((point.duration_seconds || 0) / maxSeconds) * 100)}%`,
+                    backgroundColor: getRouteColor(point.duration_seconds),
+                  }}
+                />
+              ))}
+            </div>
+            <p className="muted">
+              {points.length} captures. Latest at {formatTimestamp(latest.captured_at)}.
+            </p>
+          </section>
+        );
+      })}
+    </div>
+  );
 }
 
 function loadGoogleMaps(apiKey) {
@@ -762,6 +866,138 @@ function renderInfoWindow(listing) {
   `;
 }
 
+function drawLatestRouteLines(snapshots, selectedListingId, map) {
+  if (!map || !window.google?.maps) {
+    return [];
+  }
+
+  const latest = new Map();
+  snapshots
+    .filter((snapshot) => snapshot.direction === "from_facility" && snapshot.overview_polyline)
+    .forEach((snapshot) => {
+      const key = `${snapshot.listing_id}:${snapshot.workplace_key}`;
+      const current = latest.get(key);
+      if (!current || new Date(snapshot.captured_at) > new Date(current.captured_at)) {
+        latest.set(key, snapshot);
+      }
+    });
+
+  return Array.from(latest.values()).map((snapshot) => {
+    const isSelected = snapshot.listing_id === selectedListingId;
+    return new window.google.maps.Polyline({
+      map,
+      path: decodePolyline(snapshot.overview_polyline),
+      strokeColor: getRouteColor(snapshot.duration_seconds),
+      strokeOpacity: isSelected ? 0.95 : 0.45,
+      strokeWeight: isSelected ? 6 : 3,
+      zIndex: isSelected ? 3 : 1,
+    });
+  });
+}
+
+function getLatestListingSnapshots(snapshots, listingId) {
+  const latest = {};
+  snapshots
+    .filter((snapshot) => snapshot.listing_id === listingId && snapshot.direction === "from_facility")
+    .forEach((snapshot) => {
+      const current = latest[snapshot.workplace_key];
+      if (!current || new Date(snapshot.captured_at) > new Date(current.captured_at)) {
+        latest[snapshot.workplace_key] = snapshot;
+      }
+    });
+  return latest;
+}
+
+function getListingHistory(snapshots, listingId) {
+  const history = {};
+  snapshots
+    .filter((snapshot) => snapshot.listing_id === listingId && snapshot.direction === "from_facility")
+    .sort((a, b) => new Date(a.captured_at) - new Date(b.captured_at))
+    .forEach((snapshot) => {
+      if (!history[snapshot.workplace_key]) {
+        history[snapshot.workplace_key] = [];
+      }
+      history[snapshot.workplace_key].push(snapshot);
+    });
+  return history;
+}
+
+function getRouteColor(seconds) {
+  if (!seconds) {
+    return "#6b7280";
+  }
+  const minutes = seconds / 60;
+  if (minutes <= 20) {
+    return "#168a5a";
+  }
+  if (minutes <= 30) {
+    return "#1769e0";
+  }
+  if (minutes <= 45) {
+    return "#d97706";
+  }
+  return "#b42318";
+}
+
+function formatDuration(seconds) {
+  if (!seconds) {
+    return "Unavailable";
+  }
+  return `${Math.round(seconds / 60)} min`;
+}
+
+function formatTimestamp(value) {
+  if (!value) {
+    return "never";
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function decodePolyline(encoded) {
+  let index = 0;
+  let lat = 0;
+  let lng = 0;
+  const path = [];
+
+  while (index < encoded.length) {
+    const latResult = decodePolylineChunk(encoded, index);
+    index = latResult.index;
+    lat += latResult.value;
+
+    const lngResult = decodePolylineChunk(encoded, index);
+    index = lngResult.index;
+    lng += lngResult.value;
+
+    path.push({ lat: lat / 100000, lng: lng / 100000 });
+  }
+
+  return path;
+}
+
+function decodePolylineChunk(encoded, startIndex) {
+  let result = 0;
+  let shift = 0;
+  let index = startIndex;
+  let byte = null;
+
+  do {
+    byte = encoded.charCodeAt(index) - 63;
+    index += 1;
+    result |= (byte & 0x1f) << shift;
+    shift += 5;
+  } while (byte >= 0x20);
+
+  return {
+    index,
+    value: result & 1 ? ~(result >> 1) : result >> 1,
+  };
+}
+
 function handleAsync(fn, setStatus) {
   return async (...args) => {
     try {
@@ -902,28 +1138,6 @@ function logMaps(event, details) {
   }
 
   console.log(prefix, details);
-}
-
-function logStartupDiagnostics() {
-  if (typeof console === "undefined") {
-    return;
-  }
-
-  console.error("[house-hunter:startup]", getStartupDiagnostics());
-}
-
-function getStartupDiagnostics() {
-  return {
-    appDiagnosticVersion: APP_DIAGNOSTIC_VERSION,
-    nodeEnv: process.env.NODE_ENV,
-    hasGoogleMapsKey: Boolean(ENV_GOOGLE_MAPS_KEY),
-    googleMapsKeyPrefix: ENV_GOOGLE_MAPS_KEY ? `${ENV_GOOGLE_MAPS_KEY.slice(0, 6)}...` : "",
-    debugMapsValue: process.env.NEXT_PUBLIC_DEBUG_MAPS || "",
-    debugMapsEnabled: DEBUG_MAPS,
-    origin: typeof window !== "undefined" ? window.location.origin : "",
-    href: typeof window !== "undefined" ? window.location.href : "",
-    userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "",
-  };
 }
 
 function escapeHtml(value) {

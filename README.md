@@ -13,6 +13,9 @@ Edit `.env.local`:
 
 ```env
 NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=your_google_maps_browser_key
+GOOGLE_MAPS_SERVER_API_KEY=your_google_maps_server_key
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SECRET_KEY=your_supabase_secret_key
 ```
 
 Then run:
@@ -62,6 +65,12 @@ Use exact street addresses when you have them. The current seed listings were co
 
 On load, the app geocodes missing coordinates, computes commute times, and draws the saved drive-time areas around the workplaces.
 
+## Commute History
+
+The app can save commute snapshots to Supabase and draw the latest saved routes as colored map lines. While the Next.js server is running, `/api/commute-snapshots` captures route times every 30 minutes after the site has loaded once. Use **Capture latest** to force an immediate capture.
+
+See `docs/commute-snapshots.md` for the Supabase schema and environment setup.
+
 ### Convert a CSV to Preloaded State
 
 Use the reusable converter script:
@@ -83,16 +92,6 @@ See `docs/preloader-guide.md` for the full preloader user guide.
 ## Sharing Without a Database
 
 The app saves places in browser `localStorage`. Use **Copy share link** to create a URL containing the saved workplaces and listings so someone else can open the same view.
-
-## Tiny Database Options
-
-If you want both of you to add/edit the same live list from different devices, use one of these:
-
-- Vercel Postgres or Neon Postgres: best simple SQL option for a Vercel-hosted Next.js app.
-- Supabase: easiest if you also want login later.
-- Vercel KV/Redis: fine for one shared JSON document, but less nice for search/history.
-
-For this app, the simplest real database design is one `homes` table plus one `settings` row for the two workplace addresses. The current version avoids accounts and database setup by using preloaded JSON plus share links.
 
 ## Push to GitHub
 
