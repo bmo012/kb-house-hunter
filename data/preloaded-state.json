@@ -1,0 +1,107 @@
+{
+  "radiusMinutes": 30,
+  "workplaces": {
+    "a": {
+      "label": "Elm workplace",
+      "address": "280 Mill Street, Rochester, MI, USA",
+      "place": null
+    },
+    "b": {
+      "label": "Corewell workplace",
+      "address": "28050 Grand River Avenue, Farmington Hills, MI, USA",
+      "place": null
+    }
+  },
+  "listings": [
+    {
+      "id": "district-royal-oak-apartments",
+      "name": "District Royal Oak Apartments",
+      "address": "District Royal Oak Apartments, Royal Oak, MI",
+      "rent": "$1,590-$1,635",
+      "beds": "2",
+      "notes": "1.5 bath, community washer/dryer, hardwood floors, pool and gym, walk-in closet, review score 3.7",
+      "place": null,
+      "commutes": {}
+    },
+    {
+      "id": "charter-square",
+      "name": "Charter Square",
+      "address": "Charter Square Apartments, Michigan",
+      "rent": "$1,520-$1,620",
+      "beds": "2",
+      "notes": "1.5 bath, washer/dryer options, wood and carpet floors, pool and gym, walk-in closet, bath tub",
+      "place": null,
+      "commutes": {}
+    },
+    {
+      "id": "canterbury-square",
+      "name": "Canterbury Square",
+      "address": "Canterbury Square Apartments, Michigan",
+      "rent": "$1,380-$1,500",
+      "beds": "2",
+      "notes": "1.5 bath, community washer/dryer, wood and carpet floors, pool and gym, walk-in closet, review score 2.6",
+      "place": null,
+      "commutes": {}
+    },
+    {
+      "id": "laurel-valley-apartments",
+      "name": "Laurel Valley Apartments",
+      "address": "Laurel Valley Apartments, Michigan",
+      "rent": "$1,505-$1,615",
+      "beds": "2",
+      "notes": "2 bath, in-unit washer/dryer, wood and carpet floors, carport/pet fees noted, pool and gym, review score 4.4",
+      "place": null,
+      "commutes": {}
+    },
+    {
+      "id": "sterling-troy-apartments",
+      "name": "Sterling Troy Apartments",
+      "address": "Sterling Troy Apartments, Troy, MI",
+      "rent": "$1,180-$1,540",
+      "beds": "2",
+      "notes": "2 bath, washer/dryer options, hardwood floors, walk-in closet",
+      "place": null,
+      "commutes": {}
+    },
+    {
+      "id": "3611-rochester-rd",
+      "name": "3611 Rochester Rd",
+      "address": "3611 Rochester Rd, Troy, MI",
+      "rent": "$1,445",
+      "beds": "2",
+      "notes": "1.5 bath, community washer/dryer, wood and carpet floors, 950-1000 sq ft",
+      "place": null,
+      "commutes": {}
+    },
+    {
+      "id": "eton-sq-apts-townhomes",
+      "name": "Eton Sq Apts + Townhomes",
+      "address": "Eton Square Apartments and Townhomes, Michigan",
+      "rent": "$1,300-$1,500",
+      "beds": "2",
+      "notes": "1.5 bath, washer/dryer hookups needs verification, wood and carpet floors",
+      "place": null,
+      "commutes": {}
+    },
+    {
+      "id": "bloomfield-villas",
+      "name": "Bloomfield Villas",
+      "address": "Bloomfield Villas Apartments, Michigan",
+      "rent": "$1,410-$1,600",
+      "beds": "2",
+      "notes": "2 bath, washer/dryer options, wood and carpet floors, pool and gym, walk-in closet needs verification",
+      "place": null,
+      "commutes": {}
+    },
+    {
+      "id": "bloomfield-square-apartments",
+      "name": "Bloomfield Square Apartments",
+      "address": "Bloomfield Square Apartments, Michigan",
+      "rent": "$1,499",
+      "beds": "2",
+      "notes": "1.5 bath, community washer/dryer, wood and carpet floors, pool and gym, walk-in closet, review score 3.4",
+      "place": null,
+      "commutes": {}
+    }
+  ]
+}

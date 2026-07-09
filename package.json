@@ -1,0 +1,21 @@
+{
+  "name": "house-hunter",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "csv:preload": "node scripts/csv-to-preloaded-state.mjs"
+  },
+  "dependencies": {
+    "next": "16.2.10",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
+  },
+  "devDependencies": {
+    "eslint": "9.39.2",
+    "eslint-config-next": "16.2.10"
+  }
+}
