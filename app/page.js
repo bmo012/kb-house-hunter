@@ -49,6 +49,7 @@ export default function Home() {
   const listingAddressInputRef = useRef(null);
 
   useEffect(() => {
+    logStartupDiagnostics();
     logMaps("env", {
       hasKey: Boolean(ENV_GOOGLE_MAPS_KEY),
       keyPrefix: ENV_GOOGLE_MAPS_KEY ? `${ENV_GOOGLE_MAPS_KEY.slice(0, 6)}...` : "",
@@ -882,6 +883,23 @@ function logMaps(event, details) {
   }
 
   console.log(prefix, details);
+}
+
+function logStartupDiagnostics() {
+  if (typeof console === "undefined") {
+    return;
+  }
+
+  console.info("[house-hunter:startup]", {
+    nodeEnv: process.env.NODE_ENV,
+    hasGoogleMapsKey: Boolean(ENV_GOOGLE_MAPS_KEY),
+    googleMapsKeyPrefix: ENV_GOOGLE_MAPS_KEY ? `${ENV_GOOGLE_MAPS_KEY.slice(0, 6)}...` : "",
+    debugMapsValue: process.env.NEXT_PUBLIC_DEBUG_MAPS || "",
+    debugMapsEnabled: DEBUG_MAPS,
+    origin: typeof window !== "undefined" ? window.location.origin : "",
+    href: typeof window !== "undefined" ? window.location.href : "",
+    userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "",
+  });
 }
 
 function escapeHtml(value) {
