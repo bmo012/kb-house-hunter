@@ -219,6 +219,30 @@ textarea:focus {
   margin: 0;
 }
 
+.diagnostics-panel {
+  background: #fbfcff;
+}
+
+.diagnostics-list {
+  display: grid;
+  gap: 5px 10px;
+  grid-template-columns: auto minmax(0, 1fr);
+  margin: 0;
+}
+
+.diagnostics-list dt {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.diagnostics-list dd {
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 0.78rem;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .map-shell {
   min-height: 100vh;
   position: relative;

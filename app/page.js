@@ -7,6 +7,7 @@ const STORAGE_KEY = "houseHunterState.v2";
 const DEFAULT_CENTER = { lat: 38.9072, lng: -77.0369 };
 const ENV_GOOGLE_MAPS_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "";
 const DEBUG_MAPS = process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_DEBUG_MAPS === "true";
+const APP_DIAGNOSTIC_VERSION = "diagnostics-2026-07-09-1";
 
 const emptyState = {
   workplaces: {
@@ -31,6 +32,7 @@ export default function Home() {
   const [mapReady, setMapReady] = useState(false);
   const [draftPlace, setDraftPlace] = useState({ name: "", address: "", rent: "", beds: "", notes: "" });
   const [shareCopied, setShareCopied] = useState(false);
+  const [startupDiagnostics, setStartupDiagnostics] = useState(null);
 
   const loadedInitialStateRef = useRef(false);
   const mapNodeRef = useRef(null);
@@ -49,6 +51,7 @@ export default function Home() {
   const listingAddressInputRef = useRef(null);
 
   useEffect(() => {
+    setStartupDiagnostics(getStartupDiagnostics());
     logStartupDiagnostics();
     logMaps("env", {
       hasKey: Boolean(ENV_GOOGLE_MAPS_KEY),
@@ -436,6 +439,22 @@ export default function Home() {
           <button type="button" className="secondary" onClick={copyShareLink} disabled={!saved.listings.length && !saved.workplaces.a.address && !saved.workplaces.b.address}>
             {shareCopied ? "Copied" : "Copy share link"}
           </button>
+        </section>
+
+        <section className="panel diagnostics-panel">
+          <h2>Diagnostics</h2>
+          <dl className="diagnostics-list">
+            <dt>Build</dt>
+            <dd>{APP_DIAGNOSTIC_VERSION}</dd>
+            <dt>Google key</dt>
+            <dd>{startupDiagnostics?.hasGoogleMapsKey ? `present (${startupDiagnostics.googleMapsKeyPrefix})` : "missing"}</dd>
+            <dt>Debug env</dt>
+            <dd>{startupDiagnostics?.debugMapsValue || "not set"}</dd>
+            <dt>Debug on</dt>
+            <dd>{String(startupDiagnostics?.debugMapsEnabled ?? DEBUG_MAPS)}</dd>
+            <dt>Origin</dt>
+            <dd>{startupDiagnostics?.origin || "loading"}</dd>
+          </dl>
         </section>
 
         <section className="panel">
@@ -890,7 +909,12 @@ function logStartupDiagnostics() {
     return;
   }
 
-  console.info("[house-hunter:startup]", {
+  console.error("[house-hunter:startup]", getStartupDiagnostics());
+}
+
+function getStartupDiagnostics() {
+  return {
+    appDiagnosticVersion: APP_DIAGNOSTIC_VERSION,
     nodeEnv: process.env.NODE_ENV,
     hasGoogleMapsKey: Boolean(ENV_GOOGLE_MAPS_KEY),
     googleMapsKeyPrefix: ENV_GOOGLE_MAPS_KEY ? `${ENV_GOOGLE_MAPS_KEY.slice(0, 6)}...` : "",
@@ -899,7 +923,7 @@ function logStartupDiagnostics() {
     origin: typeof window !== "undefined" ? window.location.origin : "",
     href: typeof window !== "undefined" ? window.location.href : "",
     userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "",
-  });
+  };
 }
 
 function escapeHtml(value) {
