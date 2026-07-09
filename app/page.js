@@ -27,6 +27,7 @@ export default function Home() {
       : "Add NEXT_PUBLIC_GOOGLE_MAPS_API_KEY in .env.local, or paste a temporary key.",
     error: !ENV_GOOGLE_MAPS_KEY,
   });
+  const [mapReady, setMapReady] = useState(false);
   const [draftPlace, setDraftPlace] = useState({ name: "", address: "", rent: "", beds: "", notes: "" });
   const [shareCopied, setShareCopied] = useState(false);
 
@@ -98,6 +99,7 @@ export default function Home() {
         directionsRef.current = new window.google.maps.DirectionsService();
         infoWindowRef.current = new window.google.maps.InfoWindow();
         attachPlaceAutocomplete([workplaceAInputRef.current, workplaceBInputRef.current, listingAddressInputRef.current]);
+        setMapReady(true);
         setStatus({ text: "Map ready. Add workplaces and places to compare drive times.", error: false });
       })
       .catch(() => {
@@ -106,7 +108,7 @@ export default function Home() {
   }, [apiKey]);
 
   useEffect(() => {
-    if (!mapRef.current || !geocoderRef.current || !directionsRef.current || hydratedMissingPlacesRef.current) {
+    if (!mapReady || !mapRef.current || !geocoderRef.current || !directionsRef.current || hydratedMissingPlacesRef.current) {
       return;
     }
 
@@ -119,7 +121,7 @@ export default function Home() {
       .catch((error) => {
         setStatus({ text: error.message || "Could not load preloaded places.", error: true });
       });
-  }, [saved]);
+  }, [mapReady, saved]);
 
   const saveWorkplaces = useCallback(
     async (event) => {
@@ -294,8 +296,11 @@ export default function Home() {
   );
 
   useEffect(() => {
+    if (!mapReady) {
+      return;
+    }
     renderMap(saved);
-  }, [renderMap, saved]);
+  }, [mapReady, renderMap, saved]);
 
   const deleteListing = useCallback(
     (id) => {
@@ -479,7 +484,7 @@ function loadGoogleMaps(apiKey) {
 
     const script = document.createElement("script");
     script.dataset.googleMaps = "true";
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=places,geometry`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=places,geometry&loading=async`;
     script.async = true;
     script.defer = true;
     script.onload = resolve;
