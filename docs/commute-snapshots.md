@@ -17,7 +17,9 @@ SUPABASE_SECRET_KEY=your_supabase_secret_key
 
 ## Supabase Schema
 
-Run this SQL in the Supabase SQL editor:
+The schema is tracked in `supabase/migrations/20260709000000_create_commute_snapshots.sql`.
+
+If you need to apply it manually once, run this SQL in the Supabase SQL editor:
 
 ```sql
 create table if not exists public.commute_snapshots (
@@ -53,3 +55,15 @@ When the site loads, the client sends the current saved listings and workplaces 
 While the Next.js server process is running, it captures all listing/workplace routes every 30 minutes. The `Capture latest` button also records the same data immediately.
 
 This is process-local scheduling. It is fine for local use or a continuously running Node server, but serverless hosts can stop idle functions. For production on serverless, move the same POST capture call to a hosted cron job.
+
+## Deploying Migrations From GitHub
+
+The repository includes `.github/workflows/supabase-migrations.yml`. It runs `supabase db push` when files under `supabase/migrations/` are pushed to `main`.
+
+Add these GitHub repository secrets in **GitHub > Settings > Secrets and variables > Actions**:
+
+- `SUPABASE_ACCESS_TOKEN`: create this in Supabase account settings as a personal access token.
+- `SUPABASE_PROJECT_ID`: the project ref from your Supabase project URL or settings.
+- `SUPABASE_DB_PASSWORD`: the database password for the Supabase project.
+
+After those secrets exist, commit and push migration files to `main`. GitHub Actions will apply pending migrations to the linked Supabase project.

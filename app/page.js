@@ -36,7 +36,6 @@ export default function Home() {
   });
   const [mapReady, setMapReady] = useState(false);
   const [draftPlace, setDraftPlace] = useState({ name: "", address: "", rent: "", beds: "", notes: "" });
-  const [shareCopied, setShareCopied] = useState(false);
   const [routeSnapshots, setRouteSnapshots] = useState([]);
   const [selectedListingId, setSelectedListingId] = useState(null);
   const [snapshotStatus, setSnapshotStatus] = useState("Route history not loaded yet.");
@@ -523,14 +522,6 @@ export default function Home() {
     setStatus({ text: "Cleared saved places.", error: false });
   }, [saved]);
 
-  const copyShareLink = useCallback(async () => {
-    const encoded = encodeShareState(saved);
-    const url = `${window.location.origin}${window.location.pathname}?s=${encoded}`;
-    await navigator.clipboard.writeText(url);
-    setShareCopied(true);
-    window.setTimeout(() => setShareCopied(false), 1800);
-  }, [saved]);
-
   const captureCurrentRoutes = useCallback(async () => {
     setSnapshotStatus("Capturing current route times...");
     const response = await fetch("/api/commute-snapshots", {
@@ -579,13 +570,20 @@ export default function Home() {
 
   return (
     <main className="app-shell">
-      <header className="topbar">
-        <div>
-          <h1>House Hunter</h1>
-          <p className="muted">Compare places by live commute, history, and rush-hour shape.</p>
-        </div>
-        <div className="topbar-actions">
-          {!ENV_GOOGLE_MAPS_KEY && (
+      <aside className="sidebar" aria-label="Apartment controls">
+        <section className="brand-panel">
+          <div className="brand-mark" aria-hidden="true">
+            <span className="roof" />
+            <span className="house-body">HH</span>
+          </div>
+          <div>
+            <h1>House Hunter</h1>
+            <p className="muted">Live commute, history, and rush-hour shape.</p>
+          </div>
+        </section>
+
+        {!ENV_GOOGLE_MAPS_KEY && (
+          <section className="panel">
             <div className="api-key-field">
               <label htmlFor="temporaryGoogleMapsKey">Temporary Google Maps API key</label>
               <input id="temporaryGoogleMapsKey" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="AIza..." />
@@ -593,14 +591,8 @@ export default function Home() {
                 Load map
               </button>
             </div>
-          )}
-          <button type="button" className="secondary" onClick={copyShareLink} disabled={!saved.listings.length && !saved.workplaces.a.address && !saved.workplaces.b.address}>
-            {shareCopied ? "Copied" : "Copy share link"}
-          </button>
-        </div>
-      </header>
-
-      <aside className="sidebar" aria-label="Apartment controls">
+          </section>
+        )}
 
         <section className="panel">
           <div className="section-heading">
@@ -1383,13 +1375,6 @@ function createId() {
     return crypto.randomUUID();
   }
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-function encodeShareState(state) {
-  return btoa(unescape(encodeURIComponent(JSON.stringify(state))))
-    .replaceAll("+", "-")
-    .replaceAll("/", "_")
-    .replaceAll("=", "");
 }
 
 function readSharedStateFromUrl() {

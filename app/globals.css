@@ -87,29 +87,7 @@ h2 {
 .app-shell {
   display: grid;
   grid-template-columns: minmax(430px, 520px) minmax(0, 1fr);
-  grid-template-rows: auto minmax(0, 1fr);
   min-height: 100vh;
-}
-
-.topbar {
-  align-items: center;
-  background: rgba(255, 255, 255, 0.96);
-  border-bottom: 1px solid var(--line);
-  display: flex;
-  gap: 18px;
-  grid-column: 1 / -1;
-  justify-content: space-between;
-  min-height: 74px;
-  padding: 12px 18px;
-  position: sticky;
-  top: 0;
-  z-index: 5;
-}
-
-.topbar-actions {
-  align-items: center;
-  display: flex;
-  gap: 10px;
 }
 
 .api-key-field {
@@ -130,10 +108,54 @@ h2 {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  max-height: calc(100vh - 74px);
+  max-height: 100vh;
   overflow: auto;
   padding: 16px;
   border-right: 1px solid var(--line);
+}
+
+.brand-panel {
+  align-items: center;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: auto 1fr;
+  padding: 4px 2px 8px;
+}
+
+.brand-mark {
+  height: 50px;
+  position: relative;
+  width: 52px;
+}
+
+.brand-mark .roof {
+  border-left: 24px solid transparent;
+  border-right: 24px solid transparent;
+  border-bottom: 20px solid var(--accent);
+  display: block;
+  height: 0;
+  left: 2px;
+  position: absolute;
+  top: 0;
+  width: 0;
+}
+
+.brand-mark .house-body {
+  align-items: center;
+  background: linear-gradient(135deg, #ffffff 0%, #eef4ff 100%);
+  border: 3px solid var(--accent);
+  border-radius: 8px;
+  color: var(--accent-dark);
+  display: flex;
+  font-size: 0.86rem;
+  font-weight: 900;
+  height: 34px;
+  justify-content: center;
+  left: 5px;
+  letter-spacing: 0.03em;
+  position: absolute;
+  top: 16px;
+  width: 42px;
 }
 
 .panel {
@@ -536,13 +558,13 @@ textarea:focus {
 }
 
 .map-shell {
-  min-height: calc(100vh - 74px);
+  min-height: 100vh;
   position: relative;
 }
 
 .map {
   height: 100%;
-  min-height: calc(100vh - 74px);
+  min-height: 100vh;
   width: 100%;
 }
 
@@ -570,12 +592,6 @@ textarea:focus {
     grid-template-columns: 1fr;
   }
 
-  .topbar {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .topbar-actions,
   .api-key-field {
     align-items: stretch;
     grid-template-columns: 1fr;
