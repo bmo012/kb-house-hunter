@@ -7,6 +7,12 @@ const STORAGE_KEY = "houseHunterState.v2";
 const DEFAULT_CENTER = { lat: 38.9072, lng: -77.0369 };
 const ENV_GOOGLE_MAPS_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "";
 const DEBUG_MAPS = process.env.NEXT_PUBLIC_DEBUG_MAPS === "true";
+const WORKPLACE_COLORS = {
+  a: "#1769e0",
+  b: "#168a5a",
+};
+const LISTING_COLORS = ["#7c3aed", "#d97706", "#0891b2", "#be123c", "#4f46e5", "#15803d"];
+const TREND_TOLERANCE = 0.1;
 
 const emptyState = {
   workplaces: {
@@ -34,6 +40,9 @@ export default function Home() {
   const [routeSnapshots, setRouteSnapshots] = useState([]);
   const [selectedListingId, setSelectedListingId] = useState(null);
   const [snapshotStatus, setSnapshotStatus] = useState("Route history not loaded yet.");
+  const [editingListingId, setEditingListingId] = useState(null);
+  const [editingPlace, setEditingPlace] = useState(null);
+  const [captureSummary, setCaptureSummary] = useState({ lastCompletedAt: null, count: 0, configured: false });
 
   const loadedInitialStateRef = useRef(false);
   const mapNodeRef = useRef(null);
@@ -110,6 +119,11 @@ export default function Home() {
         throw new Error(data.error || "Could not load route history.");
       }
       setRouteSnapshots(data.snapshots || []);
+      setCaptureSummary({
+        lastCompletedAt: data.scheduler?.lastRunAt || getLatestCaptureTime(data.snapshots || []),
+        count: data.snapshots?.length || 0,
+        configured: Boolean(data.configured),
+      });
       setSnapshotStatus(
         data.configured
           ? data.scheduler?.lastRunAt
@@ -119,6 +133,19 @@ export default function Home() {
       );
     } catch (error) {
       setSnapshotStatus(error.message || "Could not load route history.");
+    }
+  }, []);
+
+  const selectListing = useCallback((listing) => {
+    setSelectedListingId(listing.id);
+    if (listing.place && mapRef.current) {
+      mapRef.current.panTo(listing.place);
+      mapRef.current.setZoom(Math.max(mapRef.current.getZoom() || 12, 13));
+    }
+    const marker = listingMarkersRef.current.get(listing.id);
+    if (marker && infoWindowRef.current) {
+      infoWindowRef.current.setContent(renderInfoWindow(listing));
+      infoWindowRef.current.open({ anchor: marker, map: mapRef.current });
     }
   }, []);
 
@@ -298,10 +325,10 @@ export default function Home() {
     radiusPolygonRef.current = new window.google.maps.Polygon({
       map: mapRef.current,
       paths: points,
-      strokeColor: "#1769e0",
+      strokeColor: workplace.color || "#1769e0",
       strokeOpacity: 0.85,
       strokeWeight: 2,
-      fillColor: "#1769e0",
+      fillColor: workplace.color || "#1769e0",
       fillOpacity: 0.16,
     });
     fitMapToPoints(points.concat([center]));
@@ -317,7 +344,9 @@ export default function Home() {
     workplaceAreaPolygonsRef.current.forEach(clearMarker);
     workplaceAreaPolygonsRef.current = [];
 
-    const workplaces = Object.values(next.workplaces).filter((workplace) => workplace.place);
+    const workplaces = Object.entries(next.workplaces)
+      .map(([key, workplace]) => ({ ...workplace, color: WORKPLACE_COLORS[key] || "#1769e0" }))
+      .filter((workplace) => workplace.place);
     if (!workplaces.length) {
       logMaps("polygon:auto-skip-no-workplaces");
       return;
@@ -325,7 +354,6 @@ export default function Home() {
 
     logMaps("polygon:auto-start", { workplaces: workplaces.map((workplace) => workplace.label), minutes: next.radiusMinutes });
     setStatus({ text: `Drawing saved ${next.radiusMinutes}-minute drive areas around the workplaces.`, error: false });
-    const colors = ["#1769e0", "#168a5a"];
     for (let index = 0; index < workplaces.length; index += 1) {
       const workplace = workplaces[index];
       logMaps("polygon:auto-workplace-start", { workplace: workplace.label });
@@ -333,10 +361,10 @@ export default function Home() {
       const polygon = new window.google.maps.Polygon({
         map: mapRef.current,
         paths: points,
-        strokeColor: colors[index] || "#1769e0",
+        strokeColor: workplace.color,
         strokeOpacity: 0.75,
         strokeWeight: 2,
-        fillColor: colors[index] || "#1769e0",
+        fillColor: workplace.color,
         fillOpacity: 0.1,
       });
       workplaceAreaPolygonsRef.current.push(polygon);
@@ -367,29 +395,36 @@ export default function Home() {
           delete workplaceMarkersRef.current[key];
           continue;
         }
+        const color = WORKPLACE_COLORS[key] || "#1769e0";
         const marker = new window.google.maps.Marker({
           map: mapRef.current,
           position: workplace.place,
+          icon: createWorkplaceMarkerIcon(color),
           label: key === "a" ? "A" : "B",
           title: workplace.label,
         });
-        marker.addListener("click", () => drawDriveTimeArea(workplace, next.radiusMinutes));
+        marker.addListener("click", () => drawDriveTimeArea({ ...workplace, color }, next.radiusMinutes));
         workplaceMarkersRef.current[key] = marker;
         logMaps("render:workplace-marker", { key, label: workplace.label, place: workplace.place });
       }
 
       listingMarkersRef.current.forEach(clearMarker);
       listingMarkersRef.current.clear();
-      next.listings.forEach((listing) => {
+      next.listings.forEach((listing, index) => {
         if (!listing.place) {
           return;
         }
+        const isSelected = listing.id === selectedListingId;
+        const color = getListingColor(index);
         const marker = new window.google.maps.Marker({
           map: mapRef.current,
           position: listing.place,
+          icon: createListingMarkerIcon(color, isSelected),
           title: listing.name,
+          zIndex: isSelected ? 5 : 2,
         });
         marker.addListener("click", () => {
+          setSelectedListingId(listing.id);
           infoWindowRef.current.setContent(renderInfoWindow(listing));
           infoWindowRef.current.open({ anchor: marker, map: mapRef.current });
         });
@@ -427,6 +462,57 @@ export default function Home() {
     (id) => {
       const next = { ...saved, listings: saved.listings.filter((listing) => listing.id !== id) };
       setSaved(next);
+      if (selectedListingId === id) {
+        setSelectedListingId(null);
+      }
+    },
+    [saved, selectedListingId],
+  );
+
+  const startEditingListing = useCallback((listing) => {
+    setEditingListingId(listing.id);
+    setEditingPlace({
+      name: listing.name || "",
+      address: listing.address || "",
+      rent: listing.rent || "",
+      beds: listing.beds || "",
+      notes: listing.notes || "",
+    });
+  }, []);
+
+  const cancelEditingListing = useCallback(() => {
+    setEditingListingId(null);
+    setEditingPlace(null);
+  }, []);
+
+  const saveListingEdit = useCallback(
+    async (event, listing) => {
+      event.preventDefault();
+      requireMap(mapRef.current);
+
+      const form = event.currentTarget;
+      const nextListing = {
+        ...listing,
+        name: form.name.value.trim(),
+        address: form.address.value.trim(),
+        rent: form.rent.value.trim(),
+        beds: form.beds.value.trim(),
+        notes: form.notes.value.trim(),
+      };
+
+      if (nextListing.address !== listing.address || !nextListing.place) {
+        nextListing.place = await geocodeAddress(geocoderRef.current, nextListing.address);
+      }
+
+      const [withCommutes] = await refreshListingCommutes([nextListing], saved.workplaces, directionsRef.current);
+      setSaved({
+        ...saved,
+        listings: saved.listings.map((item) => (item.id === listing.id ? withCommutes : item)),
+      });
+      setEditingListingId(null);
+      setEditingPlace(null);
+      setSelectedListingId(listing.id);
+      setStatus({ text: "Place updated.", error: false });
     },
     [saved],
   );
@@ -458,21 +544,32 @@ export default function Home() {
       return;
     }
     await loadRouteSnapshots();
-    setSnapshotStatus(`Captured ${data.snapshots?.length || 0} route snapshots.`);
+    const completedAt = data.scheduler?.lastRunAt || new Date().toISOString();
+    setCaptureSummary({ lastCompletedAt: completedAt, count: data.snapshots?.length || 0, configured: true });
+    setSnapshotStatus(`Captured ${data.snapshots?.length || 0} route snapshots at ${formatTimestamp(completedAt)}.`);
   }, [loadRouteSnapshots, saved]);
 
   const listingCards = useMemo(
     () =>
-      saved.listings.map((listing) => ({
-        ...listing,
-        meta: [listing.rent, listing.beds ? `${listing.beds} beds` : ""].filter(Boolean).join(" - "),
-        latestSnapshots: getLatestListingSnapshots(routeSnapshots, listing.id),
-        history: getListingHistory(routeSnapshots, listing.id),
-      })),
+      saved.listings.map((listing, index) => {
+        const latestSnapshots = getLatestListingSnapshots(routeSnapshots, listing.id);
+        return {
+          ...listing,
+          color: getListingColor(index),
+          meta: [listing.rent, listing.beds ? `${listing.beds} beds` : ""].filter(Boolean).join(" - "),
+          latestSnapshots,
+          history: getListingHistory(routeSnapshots, listing.id),
+          trends: {
+            a: getRouteTrend(latestSnapshots.a, routeSnapshots),
+            b: getRouteTrend(latestSnapshots.b, routeSnapshots),
+          },
+        };
+      }),
     [routeSnapshots, saved.listings],
   );
 
   const selectedListing = listingCards.find((listing) => listing.id === selectedListingId) || listingCards[0] || null;
+  const allDayRoutes = useMemo(() => buildAllDayRoutes(routeSnapshots), [routeSnapshots]);
 
   useEffect(() => {
     if (!selectedListingId && listingCards[0]) {
@@ -482,47 +579,64 @@ export default function Home() {
 
   return (
     <main className="app-shell">
-      <aside className="sidebar" aria-label="Apartment controls">
-        <section className="panel">
+      <header className="topbar">
+        <div>
           <h1>House Hunter</h1>
-          <p className="muted">
-            Compare apartments by current and historical drive times to both workplaces.
-          </p>
+          <p className="muted">Compare places by live commute, history, and rush-hour shape.</p>
+        </div>
+        <div className="topbar-actions">
           {!ENV_GOOGLE_MAPS_KEY && (
-            <>
-              <label className="field">
-                <span>Temporary Google Maps API key</span>
-                <input value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="AIza..." />
-              </label>
+            <div className="api-key-field">
+              <label htmlFor="temporaryGoogleMapsKey">Temporary Google Maps API key</label>
+              <input id="temporaryGoogleMapsKey" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="AIza..." />
               <button type="button" onClick={() => setApiKey(apiKey.trim())}>
                 Load map
               </button>
-            </>
+            </div>
           )}
           <button type="button" className="secondary" onClick={copyShareLink} disabled={!saved.listings.length && !saved.workplaces.a.address && !saved.workplaces.b.address}>
             {shareCopied ? "Copied" : "Copy share link"}
           </button>
-        </section>
+        </div>
+      </header>
+
+      <aside className="sidebar" aria-label="Apartment controls">
 
         <section className="panel">
-          <h2>Workplaces</h2>
+          <div className="section-heading">
+            <h2>Workplaces</h2>
+            <span className="small-pill">{saved.radiusMinutes} min radius</span>
+          </div>
+          <div className="workplace-summary">
+            {["a", "b"].map((key) => (
+              <div className="workplace-card" key={key} style={{ "--work-color": WORKPLACE_COLORS[key] }}>
+                <span className="color-dot" />
+                <div>
+                  <strong>{saved.workplaces[key].label}</strong>
+                  <p className="muted">{saved.workplaces[key].place?.address || saved.workplaces[key].address || "Not configured"}</p>
+                </div>
+              </div>
+            ))}
+          </div>
           <form
             key={`${saved.workplaces.a.address}|${saved.workplaces.b.address}|${saved.radiusMinutes}`}
             className="stack"
             onSubmit={handleAsync(saveWorkplaces, setStatus)}
           >
-            <label className="field">
-              <span>Your workplace</span>
-              <input name="workplaceA" ref={workplaceAInputRef} defaultValue={saved.workplaces.a.address} placeholder="Address or place name" />
-            </label>
-            <label className="field">
-              <span>Their workplace</span>
-              <input name="workplaceB" ref={workplaceBInputRef} defaultValue={saved.workplaces.b.address} placeholder="Address or place name" />
-            </label>
             <div className="inline">
-              <label className="field compact">
-                <span>Radius minutes</span>
-                <input name="radiusMinutes" type="number" min="5" max="90" step="5" defaultValue={saved.radiusMinutes} />
+              <label className="field">
+                <span>Your workplace</span>
+                <input name="workplaceA" ref={workplaceAInputRef} defaultValue={saved.workplaces.a.address} placeholder="Address or place name" />
+              </label>
+              <label className="field">
+                <span>Their workplace</span>
+                <input name="workplaceB" ref={workplaceBInputRef} defaultValue={saved.workplaces.b.address} placeholder="Address or place name" />
+              </label>
+            </div>
+            <div className="radius-row">
+              <label className="field slider-field">
+                <span>Drive-time area radius</span>
+                <input name="radiusMinutes" type="range" min="5" max="90" step="5" defaultValue={saved.radiusMinutes} />
               </label>
               <button type="submit">Save workplaces</button>
             </div>
@@ -562,42 +676,91 @@ export default function Home() {
           <div className="section-heading">
             <h2>Places</h2>
             <div className="button-row">
-              <button className="ghost" type="button" onClick={captureCurrentRoutes} disabled={!saved.listings.length}>
-                Capture latest
+              <button className="secondary" type="button" onClick={captureCurrentRoutes} disabled={!saved.listings.length}>
+                Capture latest drive times
               </button>
               <button className="ghost" type="button" onClick={clearListings}>
                 Clear
               </button>
             </div>
           </div>
-          <p className="muted">{snapshotStatus}</p>
+          <div className="capture-status">
+            <strong>Latest capture</strong>
+            <span>{captureSummary.lastCompletedAt ? formatTimestamp(captureSummary.lastCompletedAt) : "Not completed yet"}</span>
+            <p className="muted">{snapshotStatus}</p>
+          </div>
           <div className="listing-list" aria-live="polite">
             {!listingCards.length && <p className="muted">No places yet.</p>}
             {listingCards.map((listing) => (
               <article className={`listing-card ${selectedListing?.id === listing.id ? "selected" : ""}`} key={listing.id}>
-                <header>
-                  <button className="listing-title-button" type="button" onClick={() => setSelectedListingId(listing.id)}>
-                    <h3>{listing.name}</h3>
-                    <p className="muted">{listing.meta || listing.address}</p>
-                  </button>
-                  <button className="ghost" type="button" onClick={() => deleteListing(listing.id)}>
-                    Delete
-                  </button>
-                </header>
-                <dl>
-                  <dt>Address</dt>
-                  <dd>{listing.place?.address || listing.address}</dd>
-                  <dt>Your drive</dt>
-                  <dd>{listing.latestSnapshots.a?.duration_text || listing.commutes?.a?.label || "Set workplace"}</dd>
-                  <dt>Their drive</dt>
-                  <dd>{listing.latestSnapshots.b?.duration_text || listing.commutes?.b?.label || "Set workplace"}</dd>
-                  {listing.notes && (
-                    <>
-                      <dt>Notes</dt>
-                      <dd>{listing.notes}</dd>
-                    </>
-                  )}
-                </dl>
+                {editingListingId === listing.id ? (
+                  <form className="stack" onSubmit={handleAsync((event) => saveListingEdit(event, listing), setStatus)}>
+                    <div className="inline">
+                      <label className="field">
+                        <span>Name</span>
+                        <input name="name" value={editingPlace.name} onChange={(event) => setEditingPlace({ ...editingPlace, name: event.target.value })} required />
+                      </label>
+                      <label className="field">
+                        <span>Address</span>
+                        <input name="address" value={editingPlace.address} onChange={(event) => setEditingPlace({ ...editingPlace, address: event.target.value })} required />
+                      </label>
+                    </div>
+                    <div className="inline">
+                      <label className="field">
+                        <span>Rent</span>
+                        <input name="rent" value={editingPlace.rent} onChange={(event) => setEditingPlace({ ...editingPlace, rent: event.target.value })} />
+                      </label>
+                      <label className="field">
+                        <span>Beds</span>
+                        <input name="beds" value={editingPlace.beds} onChange={(event) => setEditingPlace({ ...editingPlace, beds: event.target.value })} />
+                      </label>
+                    </div>
+                    <label className="field">
+                      <span>Notes</span>
+                      <textarea name="notes" value={editingPlace.notes} onChange={(event) => setEditingPlace({ ...editingPlace, notes: event.target.value })} rows="3" />
+                    </label>
+                    <div className="button-row">
+                      <button type="submit">Save place</button>
+                      <button className="ghost" type="button" onClick={cancelEditingListing}>
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <>
+                    <header>
+                      <button className="listing-title-button" type="button" onClick={() => selectListing(listing)}>
+                        <span className="color-dot" style={{ "--work-color": listing.color }} />
+                        <span>
+                          <h3>{listing.name}</h3>
+                          <p className="muted">{listing.meta || listing.address}</p>
+                        </span>
+                      </button>
+                      <div className="button-row">
+                        <button className="ghost" type="button" onClick={() => startEditingListing(listing)}>
+                          Edit
+                        </button>
+                        <button className="delete-button" type="button" onClick={() => deleteListing(listing.id)} aria-label={`Delete ${listing.name}`}>
+                          x
+                        </button>
+                      </div>
+                    </header>
+                    <p className="address-line">{listing.place?.address || listing.address}</p>
+                    <div className="drive-chip-row">
+                      {["a", "b"].map((key) => (
+                        <DriveChip
+                          key={key}
+                          label={saved.workplaces[key].label}
+                          color={WORKPLACE_COLORS[key]}
+                          value={listing.latestSnapshots[key]?.duration_text || listing.commutes?.[key]?.label || "Set workplace"}
+                          trend={listing.trends[key]}
+                        />
+                      ))}
+                    </div>
+                    <ListingMiniHistory listing={listing} />
+                    {listing.notes && <p className="notes-line">{listing.notes}</p>}
+                  </>
+                )}
               </article>
             ))}
           </div>
@@ -605,10 +768,18 @@ export default function Home() {
 
         {selectedListing && (
           <section className="panel">
-            <h2>{selectedListing.name} route history</h2>
+            <div className="section-heading">
+              <h2>{selectedListing.name} route history</h2>
+              <span className="small-pill">{Object.values(selectedListing.history).flat().length} captures</span>
+            </div>
             <RouteHistory listing={selectedListing} />
           </section>
         )}
+
+        <section className="panel">
+          <h2>All drives by time of day</h2>
+          <AllDayDriveView routes={allDayRoutes} />
+        </section>
       </aside>
 
       <section className="map-shell">
@@ -629,6 +800,54 @@ export default function Home() {
   }
 }
 
+function DriveChip({ label, color, value, trend }) {
+  return (
+    <div className="drive-chip" style={{ "--work-color": color, "--trend-color": trend.color }}>
+      <span className="drive-icon" aria-hidden="true">
+        DR
+      </span>
+      <span>
+        <strong>{value}</strong>
+        <small>{label}</small>
+      </span>
+      <em>{trend.label}</em>
+    </div>
+  );
+}
+
+function ListingMiniHistory({ listing }) {
+  const workplaceKeys = Object.keys(listing.history);
+  if (!workplaceKeys.length) {
+    return null;
+  }
+
+  return (
+    <div className="mini-history">
+      {workplaceKeys.map((key) => {
+        const points = listing.history[key].slice(-24);
+        const maxSeconds = Math.max(...points.map((point) => point.duration_seconds || 0), 1);
+        return (
+          <div className="mini-history-row" key={key}>
+            <span style={{ "--work-color": WORKPLACE_COLORS[key] || "#1769e0" }}>{key.toUpperCase()}</span>
+            <div>
+              {points.map((point) => (
+                <i
+                  key={point.id || `${point.captured_at}-${point.workplace_key}`}
+                  title={`${formatTimestamp(point.captured_at)}: ${formatDuration(point.duration_seconds)}`}
+                  style={{
+                    height: `${Math.max(18, ((point.duration_seconds || 0) / maxSeconds) * 100)}%`,
+                    backgroundColor: getRouteColor(point.duration_seconds),
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function RouteHistory({ listing }) {
   const workplaceKeys = Object.keys(listing.history);
 
@@ -642,13 +861,14 @@ function RouteHistory({ listing }) {
         const points = listing.history[key];
         const latest = points.at(-1);
         const maxSeconds = Math.max(...points.map((point) => point.duration_seconds || 0), 1);
+        const trend = getRouteTrend(latest, points);
 
         return (
           <section className="history-group" key={key}>
             <div className="section-heading">
               <h3>{latest.workplace_label}</h3>
-              <span className="route-pill" style={{ backgroundColor: getRouteColor(latest.duration_seconds) }}>
-                {formatDuration(latest.duration_seconds)}
+              <span className="route-pill" style={{ backgroundColor: trend.color }}>
+                {formatDuration(latest.duration_seconds)} {trend.label}
               </span>
             </div>
             <div className="spark-bars" aria-label={`${latest.workplace_label} commute time history`}>
@@ -669,6 +889,33 @@ function RouteHistory({ listing }) {
           </section>
         );
       })}
+    </div>
+  );
+}
+
+function AllDayDriveView({ routes }) {
+  if (!routes.length) {
+    return <p className="muted">No captured drives yet. Capture latest drive times now and let the history run to see rush-hour patterns.</p>;
+  }
+
+  const maxSeconds = Math.max(...routes.map((route) => route.averageSeconds || 0), 1);
+
+  return (
+    <div className="all-day-chart">
+      {routes.map((route) => (
+        <div className="time-row" key={`${route.hour}-${route.workplaceKey}`}>
+          <span>{route.hourLabel}</span>
+          <div className="time-bar-track">
+            <span
+              style={{
+                width: `${Math.max(5, (route.averageSeconds / maxSeconds) * 100)}%`,
+                backgroundColor: WORKPLACE_COLORS[route.workplaceKey] || getRouteColor(route.averageSeconds),
+              }}
+            />
+          </div>
+          <strong>{formatDuration(route.averageSeconds)}</strong>
+        </div>
+      ))}
     </div>
   );
 }
@@ -884,15 +1131,44 @@ function drawLatestRouteLines(snapshots, selectedListingId, map) {
 
   return Array.from(latest.values()).map((snapshot) => {
     const isSelected = snapshot.listing_id === selectedListingId;
+    const trend = getRouteTrend(snapshot, snapshots);
     return new window.google.maps.Polyline({
       map,
       path: decodePolyline(snapshot.overview_polyline),
-      strokeColor: getRouteColor(snapshot.duration_seconds),
+      strokeColor: trend.color,
       strokeOpacity: isSelected ? 0.95 : 0.45,
       strokeWeight: isSelected ? 6 : 3,
       zIndex: isSelected ? 3 : 1,
     });
   });
+}
+
+function createWorkplaceMarkerIcon(color) {
+  if (!window.google?.maps) {
+    return undefined;
+  }
+  return {
+    path: window.google.maps.SymbolPath.CIRCLE,
+    fillColor: color,
+    fillOpacity: 1,
+    strokeColor: "#ffffff",
+    strokeWeight: 3,
+    scale: 14,
+  };
+}
+
+function createListingMarkerIcon(color, selected) {
+  if (!window.google?.maps) {
+    return undefined;
+  }
+  return {
+    path: window.google.maps.SymbolPath.BACKWARD_CLOSED_ARROW,
+    fillColor: color,
+    fillOpacity: 1,
+    strokeColor: selected ? "#111827" : "#ffffff",
+    strokeWeight: selected ? 4 : 2,
+    scale: selected ? 7 : 5,
+  };
 }
 
 function getLatestListingSnapshots(snapshots, listingId) {
@@ -922,6 +1198,82 @@ function getListingHistory(snapshots, listingId) {
   return history;
 }
 
+function getListingColor(index) {
+  return LISTING_COLORS[index % LISTING_COLORS.length];
+}
+
+function getRouteTrend(snapshot, snapshots) {
+  if (!snapshot?.duration_seconds) {
+    return { label: "no data", color: "#6b7280", normalSeconds: null };
+  }
+
+  const peerDurations = snapshots
+    .filter(
+      (item) =>
+        item !== snapshot &&
+        item.listing_id === snapshot.listing_id &&
+        item.workplace_key === snapshot.workplace_key &&
+        item.direction === snapshot.direction &&
+        item.duration_seconds &&
+        (!item.id || !snapshot.id || item.id !== snapshot.id),
+    )
+    .map((item) => item.duration_seconds);
+
+  if (!peerDurations.length) {
+    return { label: "new", color: getRouteColor(snapshot.duration_seconds), normalSeconds: snapshot.duration_seconds };
+  }
+
+  const normalSeconds = peerDurations.reduce((sum, seconds) => sum + seconds, 0) / peerDurations.length;
+  const delta = (snapshot.duration_seconds - normalSeconds) / normalSeconds;
+  if (delta > TREND_TOLERANCE) {
+    return { label: "up", color: "#b42318", normalSeconds };
+  }
+  if (delta < -TREND_TOLERANCE) {
+    return { label: "down", color: "#168a5a", normalSeconds };
+  }
+  return { label: "normal", color: "#1769e0", normalSeconds };
+}
+
+function getLatestCaptureTime(snapshots) {
+  return snapshots.reduce((latest, snapshot) => {
+    if (!snapshot.captured_at) {
+      return latest;
+    }
+    if (!latest || new Date(snapshot.captured_at) > new Date(latest)) {
+      return snapshot.captured_at;
+    }
+    return latest;
+  }, null);
+}
+
+function buildAllDayRoutes(snapshots) {
+  const groups = new Map();
+  snapshots
+    .filter((snapshot) => snapshot.direction === "from_facility" && snapshot.duration_seconds && snapshot.captured_at)
+    .forEach((snapshot) => {
+      const date = new Date(snapshot.captured_at);
+      const hour = date.getHours();
+      const key = `${hour}:${snapshot.workplace_key}`;
+      const current = groups.get(key) || {
+        hour,
+        hourLabel: formatHour(hour),
+        workplaceKey: snapshot.workplace_key,
+        totalSeconds: 0,
+        count: 0,
+      };
+      current.totalSeconds += snapshot.duration_seconds;
+      current.count += 1;
+      groups.set(key, current);
+    });
+
+  return Array.from(groups.values())
+    .map((group) => ({
+      ...group,
+      averageSeconds: group.totalSeconds / group.count,
+    }))
+    .sort((a, b) => a.hour - b.hour || a.workplaceKey.localeCompare(b.workplaceKey));
+}
+
 function getRouteColor(seconds) {
   if (!seconds) {
     return "#6b7280";
@@ -944,6 +1296,12 @@ function formatDuration(seconds) {
     return "Unavailable";
   }
   return `${Math.round(seconds / 60)} min`;
+}
+
+function formatHour(hour) {
+  const date = new Date();
+  date.setHours(hour, 0, 0, 0);
+  return new Intl.DateTimeFormat(undefined, { hour: "numeric" }).format(date);
 }
 
 function formatTimestamp(value) {
