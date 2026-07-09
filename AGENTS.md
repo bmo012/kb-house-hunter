@@ -7,7 +7,7 @@
 - `scripts/` contains utility scripts, including CSV conversion.
 - `docs/` contains project-specific guides such as the preloader documentation.
 
-Keep generated output such as `.next/` and dependencies such as `node_modules/` out of commits
+Keep generated output such as `.next/` and dependencies such as `node_modules/` out of commits.
 
 ## Build, Test, and Development Commands
 
