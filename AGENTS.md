@@ -7,7 +7,7 @@
 - `scripts/` contains utility scripts, including CSV conversion.
 - `docs/` contains project-specific guides such as the preloader documentation.
 
-Keep generated output such as `.next/` and dependencies such as `node_modules/` out of commits.
+Keep generated output such as `.next/` and dependencies such as `node_modules/` out of commits
 
 ## Build, Test, and Development Commands
 
@@ -61,3 +61,4 @@ Pull requests should include a concise summary, testing performed, and screensho
 ## Security & Configuration Tips
 
 Copy `.env.local.example` to `.env.local` and set `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`. Browser map keys are visible to users, so restrict the key by HTTP referrer in Google Cloud. Do not commit real secrets or private addresses unless they are intended shared seed data.
+ 
