@@ -6,6 +6,7 @@ import preloadedState from "../data/preloaded-state.json";
 const STORAGE_KEY = "houseHunterState.v2";
 const DEFAULT_CENTER = { lat: 38.9072, lng: -77.0369 };
 const ENV_GOOGLE_MAPS_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "";
+const DEBUG_MAPS = process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_DEBUG_MAPS === "true";
 
 const emptyState = {
   workplaces: {
@@ -48,8 +49,18 @@ export default function Home() {
   const listingAddressInputRef = useRef(null);
 
   useEffect(() => {
+    logMaps("env", {
+      hasKey: Boolean(ENV_GOOGLE_MAPS_KEY),
+      keyPrefix: ENV_GOOGLE_MAPS_KEY ? `${ENV_GOOGLE_MAPS_KEY.slice(0, 6)}...` : "",
+      debug: DEBUG_MAPS,
+    });
+
     const sharedState = readSharedStateFromUrl();
     if (sharedState) {
+      logMaps("state:shared-url", {
+        listings: sharedState.listings.length,
+        workplaces: summarizeWorkplaces(sharedState.workplaces),
+      });
       setSaved(sharedState);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(sharedState));
       window.history.replaceState({}, "", window.location.pathname);
@@ -59,12 +70,22 @@ export default function Home() {
 
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) {
+      logMaps("state:preloaded", {
+        listings: defaultState.listings.length,
+        workplaces: summarizeWorkplaces(defaultState.workplaces),
+      });
       loadedInitialStateRef.current = true;
       return;
     }
     try {
-      setSaved(mergeState(JSON.parse(raw), defaultState));
+      const localState = mergeState(JSON.parse(raw), defaultState);
+      logMaps("state:local-storage", {
+        listings: localState.listings.length,
+        workplaces: summarizeWorkplaces(localState.workplaces),
+      });
+      setSaved(localState);
     } catch {
+      logMaps("state:local-storage-invalid");
       localStorage.removeItem(STORAGE_KEY);
     }
     loadedInitialStateRef.current = true;
@@ -79,15 +100,30 @@ export default function Home() {
 
   useEffect(() => {
     if (!apiKey) {
+      logMaps("script:skip-no-api-key");
       return;
     }
 
+    logMaps("script:load-start", {
+      keyPrefix: `${apiKey.slice(0, 6)}...`,
+      libraries: ["places", "geometry"],
+    });
     loadGoogleMaps(apiKey)
       .then(() => {
+        logMaps("script:load-success", {
+          hasGoogle: Boolean(window.google),
+          hasMaps: Boolean(window.google?.maps),
+          mapsVersion: window.google?.maps?.version,
+        });
         if (!mapNodeRef.current || mapRef.current) {
+          logMaps("map:init-skipped", {
+            hasNode: Boolean(mapNodeRef.current),
+            alreadyInitialized: Boolean(mapRef.current),
+          });
           return;
         }
 
+        logMaps("map:init-start", { center: DEFAULT_CENTER });
         mapRef.current = new window.google.maps.Map(mapNodeRef.current, {
           center: DEFAULT_CENTER,
           clickableIcons: true,
@@ -100,25 +136,45 @@ export default function Home() {
         infoWindowRef.current = new window.google.maps.InfoWindow();
         attachPlaceAutocomplete([workplaceAInputRef.current, workplaceBInputRef.current, listingAddressInputRef.current]);
         setMapReady(true);
+        logMaps("map:init-success");
         setStatus({ text: "Map ready. Add workplaces and places to compare drive times.", error: false });
       })
-      .catch(() => {
+      .catch((error) => {
+        logMaps("script:load-error", error);
         setStatus({ text: "Could not load Google Maps. Check the API key and enabled APIs.", error: true });
       });
   }, [apiKey]);
 
   useEffect(() => {
     if (!mapReady || !mapRef.current || !geocoderRef.current || !directionsRef.current || hydratedMissingPlacesRef.current) {
+      logMaps("hydrate:skip", {
+        mapReady,
+        hasMap: Boolean(mapRef.current),
+        hasGeocoder: Boolean(geocoderRef.current),
+        hasDirections: Boolean(directionsRef.current),
+        alreadyHydrated: hydratedMissingPlacesRef.current,
+      });
       return;
     }
 
     hydratedMissingPlacesRef.current = true;
+    logMaps("hydrate:start", {
+      listings: saved.listings.length,
+      missingListingPlaces: saved.listings.filter((listing) => listing.address && !listing.place).length,
+      workplaces: summarizeWorkplaces(saved.workplaces),
+    });
     hydrateMissingPlaces(saved)
       .then((next) => {
+        logMaps("hydrate:success", {
+          listings: next.listings.length,
+          listingPlaces: next.listings.filter((listing) => listing.place).length,
+          workplaces: summarizeWorkplaces(next.workplaces),
+        });
         setSaved(next);
         setStatus({ text: "Loaded preloaded places and commute data.", error: false });
       })
       .catch((error) => {
+        logMaps("hydrate:error", error);
         setStatus({ text: error.message || "Could not load preloaded places.", error: true });
       });
   }, [mapReady, saved]);
@@ -144,7 +200,9 @@ export default function Home() {
           delete workplaceMarkersRef.current[key];
           continue;
         }
+        logMaps("geocode:workplace-start", { key, address: next.workplaces[key].address });
         next.workplaces[key].place = await geocodeAddress(geocoderRef.current, next.workplaces[key].address);
+        logMaps("geocode:workplace-success", { key, place: next.workplaces[key].place });
       }
 
       next.listings = await refreshListingCommutes(next.listings, next.workplaces, directionsRef.current);
@@ -170,6 +228,7 @@ export default function Home() {
         place: await geocodeAddress(geocoderRef.current, draftPlace.address.trim()),
         commutes: {},
       };
+      logMaps("geocode:listing-success", { name: listing.name, place: listing.place });
 
       const [withCommutes] = await refreshListingCommutes([listing], saved.workplaces, directionsRef.current);
       const next = { ...saved, listings: [...saved.listings, withCommutes] };
@@ -182,10 +241,12 @@ export default function Home() {
 
   const drawDriveTimeArea = useCallback(async (workplace, radiusMinutes) => {
     if (!workplace.place) {
+      logMaps("polygon:click-skip-no-place", { workplace: workplace.label });
       return;
     }
 
     const minutes = Number(radiusMinutes) || 30;
+    logMaps("polygon:click-start", { workplace: workplace.label, minutes });
     setStatus({ text: `Calculating an approximate ${minutes}-minute drive-time area.`, error: false });
     clearMarker(radiusPolygonRef.current);
 
@@ -206,6 +267,7 @@ export default function Home() {
       fillOpacity: 0.16,
     });
     fitMapToPoints(points.concat([center]));
+    logMaps("polygon:click-success", { workplace: workplace.label, points: points.length });
     setStatus({ text: `Showing approximate ${minutes}-minute driving area from ${workplace.label}.`, error: false });
   }, []);
 
@@ -219,13 +281,16 @@ export default function Home() {
 
     const workplaces = Object.values(next.workplaces).filter((workplace) => workplace.place);
     if (!workplaces.length) {
+      logMaps("polygon:auto-skip-no-workplaces");
       return;
     }
 
+    logMaps("polygon:auto-start", { workplaces: workplaces.map((workplace) => workplace.label), minutes: next.radiusMinutes });
     setStatus({ text: `Drawing saved ${next.radiusMinutes}-minute drive areas around the workplaces.`, error: false });
     const colors = ["#1769e0", "#168a5a"];
     for (let index = 0; index < workplaces.length; index += 1) {
       const workplace = workplaces[index];
+      logMaps("polygon:auto-workplace-start", { workplace: workplace.label });
       const points = await buildDriveTimePolygon(workplace.place, next.radiusMinutes, directionsRef.current, 12);
       const polygon = new window.google.maps.Polygon({
         map: mapRef.current,
@@ -237,6 +302,7 @@ export default function Home() {
         fillOpacity: 0.1,
       });
       workplaceAreaPolygonsRef.current.push(polygon);
+      logMaps("polygon:auto-workplace-success", { workplace: workplace.label, points: points.length });
     }
     setStatus({ text: "Showing saved drive-time areas around both workplaces.", error: false });
   }, []);
@@ -244,9 +310,18 @@ export default function Home() {
   const renderMap = useCallback(
     (next) => {
       if (!mapRef.current || !window.google?.maps) {
+        logMaps("render:skip-map-not-ready", {
+          hasMap: Boolean(mapRef.current),
+          hasGoogleMaps: Boolean(window.google?.maps),
+        });
         return;
       }
 
+      logMaps("render:start", {
+        listings: next.listings.length,
+        listingPlaces: next.listings.filter((listing) => listing.place).length,
+        workplaces: summarizeWorkplaces(next.workplaces),
+      });
       for (const key of ["a", "b"]) {
         const workplace = next.workplaces[key];
         clearMarker(workplaceMarkersRef.current[key]);
@@ -262,6 +337,7 @@ export default function Home() {
         });
         marker.addListener("click", () => drawDriveTimeArea(workplace, next.radiusMinutes));
         workplaceMarkersRef.current[key] = marker;
+        logMaps("render:workplace-marker", { key, label: workplace.label, place: workplace.place });
       }
 
       listingMarkersRef.current.forEach(clearMarker);
@@ -280,6 +356,7 @@ export default function Home() {
           infoWindowRef.current.open({ anchor: marker, map: mapRef.current });
         });
         listingMarkersRef.current.set(listing.id, marker);
+        logMaps("render:listing-marker", { id: listing.id, name: listing.name, place: listing.place });
       });
 
       fitMapToPoints([
@@ -291,14 +368,17 @@ export default function Home() {
         drewInitialWorkplaceAreasRef.current = true;
         drawSavedWorkplaceAreas(next);
       }
+      logMaps("render:success");
     },
     [drawDriveTimeArea, drawSavedWorkplaceAreas],
   );
 
   useEffect(() => {
     if (!mapReady) {
+      logMaps("render-effect:skip-map-not-ready");
       return;
     }
+    logMaps("render-effect:start");
     renderMap(saved);
   }, [mapReady, renderMap, saved]);
 
@@ -470,24 +550,37 @@ export default function Home() {
 }
 
 function loadGoogleMaps(apiKey) {
-  if (window.google?.maps) {
+  if (typeof window.google?.maps?.Map === "function") {
+    logMaps("script:already-loaded");
     return Promise.resolve();
   }
 
   return new Promise((resolve, reject) => {
     const existing = document.querySelector("script[data-google-maps]");
     if (existing) {
-      existing.addEventListener("load", resolve, { once: true });
+      logMaps("script:existing-tag-found");
+      if (typeof window.google?.maps?.Map === "function") {
+        resolve();
+        return;
+      }
+      window.initHouseHunterGoogleMaps = () => {
+        logMaps("script:callback-existing");
+        resolve();
+      };
       existing.addEventListener("error", reject, { once: true });
       return;
     }
 
+    window.initHouseHunterGoogleMaps = () => {
+      logMaps("script:callback");
+      resolve();
+    };
+
     const script = document.createElement("script");
     script.dataset.googleMaps = "true";
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=places,geometry&loading=async`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=places,geometry&loading=async&callback=initHouseHunterGoogleMaps`;
     script.async = true;
     script.defer = true;
-    script.onload = resolve;
     script.onerror = reject;
     document.head.append(script);
   });
@@ -495,8 +588,10 @@ function loadGoogleMaps(apiKey) {
 
 function attachPlaceAutocomplete(inputs) {
   if (!window.google.maps.places?.Autocomplete) {
+    logMaps("autocomplete:skip-unavailable");
     return;
   }
+  logMaps("autocomplete:attach", { inputs: inputs.filter(Boolean).length });
   inputs.filter(Boolean).forEach((input) => {
     new window.google.maps.places.Autocomplete(input, {
       fields: ["formatted_address", "geometry", "name"],
@@ -505,16 +600,23 @@ function attachPlaceAutocomplete(inputs) {
 }
 
 async function geocodeAddress(geocoder, address) {
+  if (!geocoder) {
+    throw new Error("Google geocoder is not initialized.");
+  }
+  logMaps("geocode:start", { address });
   const response = await geocoder.geocode({ address });
   if (!response.results.length) {
+    logMaps("geocode:no-results", { address, response });
     throw new Error(`No result found for "${address}".`);
   }
   const result = response.results[0];
-  return {
+  const place = {
     address: result.formatted_address,
     lat: result.geometry.location.lat(),
     lng: result.geometry.location.lng(),
   };
+  logMaps("geocode:success", { address, place });
+  return place;
 }
 
 async function refreshListingCommutes(listings, workplaces, directionsService) {
@@ -527,7 +629,18 @@ async function refreshListingCommutes(listings, workplaces, directionsService) {
         delete commutes[key];
         continue;
       }
+      logMaps("directions:listing-start", {
+        listing: listing.name,
+        workplace: workplace.label,
+        origin: listing.place,
+        destination: workplace.place,
+      });
       commutes[key] = await getDriveTime(directionsService, listing.place, workplace.place);
+      logMaps("directions:listing-success", {
+        listing: listing.name,
+        workplace: workplace.label,
+        commute: commutes[key],
+      });
     }
     next.push({ ...listing, commutes });
   }
@@ -536,6 +649,12 @@ async function refreshListingCommutes(listings, workplaces, directionsService) {
 
 function getDriveTime(directionsService, origin, destination) {
   return new Promise((resolve) => {
+    if (!directionsService) {
+      logMaps("directions:error-no-service");
+      resolve({ label: "Unavailable", seconds: null });
+      return;
+    }
+    logMaps("directions:start", { origin, destination });
     directionsService.route(
       {
         origin,
@@ -545,18 +664,22 @@ function getDriveTime(directionsService, origin, destination) {
       },
       (result, status) => {
         if (status !== "OK") {
+          logMaps("directions:error-status", { status, origin, destination, result });
           resolve({ label: "Unavailable", seconds: null });
           return;
         }
         const leg = result.routes[0].legs[0];
         const duration = leg.duration_in_traffic || leg.duration;
-        resolve({ label: duration.text, seconds: duration.value });
+        const commute = { label: duration.text, seconds: duration.value };
+        logMaps("directions:success", commute);
+        resolve(commute);
       },
     );
   });
 }
 
 async function findReachablePoint(center, bearing, targetMinutes, directionsService) {
+  logMaps("polygon:sample-start", { bearing, targetMinutes });
   const targetSeconds = targetMinutes * 60;
   let lowMiles = 1;
   let highMiles = Math.max(8, targetMinutes * 1.2);
@@ -584,6 +707,7 @@ async function findReachablePoint(center, bearing, targetMinutes, directionsServ
     }
   }
 
+  logMaps("polygon:sample-success", { bearing, point: best });
   return best;
 }
 
@@ -721,6 +845,43 @@ function slugify(value) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "")
     .slice(0, 80);
+}
+
+function summarizeWorkplaces(workplaces) {
+  return Object.fromEntries(
+    Object.entries(workplaces || {}).map(([key, workplace]) => [
+      key,
+      {
+        label: workplace.label,
+        hasAddress: Boolean(workplace.address),
+        address: workplace.address || "",
+        hasPlace: Boolean(workplace.place),
+        place: workplace.place || null,
+      },
+    ]),
+  );
+}
+
+function logMaps(event, details) {
+  if (!DEBUG_MAPS || typeof console === "undefined") {
+    return;
+  }
+
+  const prefix = `[house-hunter:maps] ${event}`;
+  if (details instanceof Error) {
+    console.error(prefix, {
+      message: details.message,
+      stack: details.stack,
+    });
+    return;
+  }
+
+  if (details === undefined) {
+    console.log(prefix);
+    return;
+  }
+
+  console.log(prefix, details);
 }
 
 function escapeHtml(value) {
